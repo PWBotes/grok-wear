@@ -125,6 +125,7 @@ public final class VoiceService extends Service {
         PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);KeyguardManager keyguard=(KeyguardManager)getSystemService(KEYGUARD_SERVICE);
         if(!power.isInteractive()||keyguard.isKeyguardLocked()||checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){finish("Ready","Tap Voice chat again while the watch is unlocked.");return START_NOT_STICKY;}
         running=true;callHistoryEpoch=historyEpoch;long mine=++generation;talkElapsed=SystemClock.elapsedRealtime();lineDown=false;leaseMs=-1;planMs=-1;mintMs=-1;dialMs=-1;listeningMs=-1;state="Connecting";caption="";speaker="";error="";muted=false;responseIdle=true;drained=true;ending=false;endReady=false;
+        android.util.Log.i(MicSource.TAG,"keep_screen_on="+MicSource.keepScreenOn(this));
         liveStartedAt=0;finishedElapsed=0;callDeadlineElapsed=SystemClock.elapsedRealtime()+300000;syncStatus="Connecting voice";callAccount=null;callContext=null;
         try{Notification notification=notification();startForeground(NOTIFICATION,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             wake=power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"grokwear:voice");wake.setReferenceCounted(false);wake.acquire(310000);

@@ -139,7 +139,7 @@ public final class MainActivity extends Activity {
     private String receiptIdentity="",receiptSync="";private long receiptElapsed;private boolean receiptRefreshPending;private JSONObject avatarTheme;
     private JSONObject selectedMetadata=new JSONObject();private JSONObject botPreferences=new JSONObject();private LinearLayout transcriptBody;private boolean micTicked;
     private final Runnable voiceListener=()->{
-        if(!visible||preview)return;VoiceService.Snapshot status=VoiceService.snapshot();
+        if(!visible||preview)return;VoiceService.Snapshot status=VoiceService.snapshot();updateKeepScreen();
         if(!status.active&&!receiptIdentity.isEmpty()){receiptElapsed=status.elapsedMs;receiptSync=status.syncStatus;}
         if(status.active||isCall()||screen.equals("done")||screen.equals("error")||screen.equals("dropped"))renderVoice();
         else if(screen.equals("ready"))render(); // A save completion must not navigate History, Settings or the picker.
@@ -242,7 +242,7 @@ public final class MainActivity extends Activity {
         assistUntil=0;talk();
     }
     private static String openBotExtra(Intent intent){String id=intent==null?null:intent.getStringExtra(ReplyAlertService.OPEN_BOT);return id==null||id.length()>512?"":id;}
-    @Override protected void onResume(){super.onResume();visible=true;if(!preview)UpdateCheck.maybeCheck(this,()->{if(visible&&(screen.equals("bots")||screen.equals("settings")))render();});for(BotAvatarView face:avatars)face.running(true);if(waveform!=null)waveform.running(true);if(isCall()){main.removeCallbacks(callClock);main.post(callClock);}
+    @Override protected void onResume(){super.onResume();visible=true;updateKeepScreen();if(!preview)UpdateCheck.maybeCheck(this,()->{if(visible&&(screen.equals("bots")||screen.equals("settings")))render();});for(BotAvatarView face:avatars)face.running(true);if(waveform!=null)waveform.running(true);if(isCall()){main.removeCallbacks(callClock);main.post(callClock);}
         if(!preview){VoiceService.addListener(voiceListener);EventStream.add(this,live);if(SIGN_OUT_ACTIVE.get()){screen="signout_confirm";render();main.removeCallbacks(signOutObserver);main.post(signOutObserver);return;}if(awaitingMicrophonePermission&&!pendingTalkCurrent())clearPendingTalk();rosterRetries=0;
             // The assistant button during a call just shows the call; after one ends, it starts the next from the Bot page.
             if(pendingAssist&&(VoiceService.snapshot().active||isCall()))pendingAssist=false;
@@ -303,7 +303,19 @@ public final class MainActivity extends Activity {
     }
     private int dp(float value){return Math.round(value*getResources().getDisplayMetrics().density);}
     private GradientDrawable shape(int color,float radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
-    private void render(){
+    /**
+     * FLAG_KEEP_SCREEN_ON while a call is active and the setting is On; cleared otherwise. Applies only while
+     * Grok Wear is in front (the app has no ambient mode, so nothing overrides it).
+     */
+    private boolean keepingScreen;
+    private void updateKeepScreen(){
+        if(preview)return;
+        boolean want=false;try{want=MicSource.keepScreenOn(this)&&(VoiceService.snapshot().active||isCall());}catch(RuntimeException ignored){}
+        if(want==keepingScreen)return;keepingScreen=want;
+        try{if(want)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}catch(RuntimeException ignored){}
+        android.util.Log.i(MicSource.TAG,"keep_screen_flag="+want);
+    }
+    private void render(){updateKeepScreen();
         syncCallVolume();
         // Re-rendering the same screen (history refresh, sync status) keeps the reader's place.
         final int keepY=currentScroll!=null&&screen.equals(renderedScreen)&&!isCall()?currentScroll.getScrollY():0;renderedScreen=screen;bottomAction=false;
@@ -1700,6 +1712,18 @@ public final class MainActivity extends Activity {
         Button hold=action("Assistant button: "+(button?"On":"Off"),()->toggleButton());hold.setContentDescription("Assistant button, "+(button?"on":"off")+". Double-tap to open the watch’s assistant settings");
         String target=assistTarget(preview?null:primaryBot());
         label(button?"Hold the watch’s assistant button to call "+target+". To turn this off, choose another assistant.":"Hold the watch’s assistant button to call "+target+" (the Home key on a Galaxy Watch, the crown on a Pixel Watch). No extra battery.",12,SECONDARY);gap(8);
+        int mic=MicSource.get(this);
+        Button micButton=action("Microphone: "+MicSource.label(mic),()->{MicSource.set(this,MicSource.next(mic));render();});micButton.setContentDescription("Microphone source, "+MicSource.label(mic)+". Double-tap to change");
+        label(mic==MicSource.AUTO?"Calls use the voice recognition mic, then the plain mic, then the call mic if those fail.":mic==MicSource.CALL?"Calls always use the call mic with echo cancelling.":mic==MicSource.RECOGNITION?"Calls use the voice recognition mic, like dictation.":"Calls use the plain mic.",12,SECONDARY);gap(8);
+        boolean keepOn=MicSource.keepScreenOn(this);
+        Button keepButton=action("Keep screen on: "+(keepOn?"On":"Off"),()->{MicSource.setKeepScreenOn(this,!keepOn);render();});keepButton.setContentDescription("Keep screen on during calls, "+(keepOn?"on":"off")+". Double-tap to turn "+(keepOn?"off":"on"));
+        label(keepOn?"The screen stays on during a call while Grok Wear is open.":"The screen times out as usual during calls.",12,SECONDARY);gap(8);
+        int voiceBoost=MicSource.voiceBoost(this);
+        Button voiceButton=action("Voice volume: "+MicSource.voiceBoostLabel(voiceBoost),()->{MicSource.setVoiceBoost(this,MicSource.nextVoiceBoost(voiceBoost));render();});voiceButton.setContentDescription("Voice volume, "+MicSource.voiceBoostLabel(voiceBoost)+". Double-tap to change");
+        label(voiceBoost==MicSource.VOICE_NORMAL?"The Bot plays at the watch’s media volume.":voiceBoost==MicSource.VOICE_MAX?"Strongest boost (+15 dB); may sound harsh. Applies from the next call.":"Makes the Bot louder (+9 dB). Applies from the next call.",12,SECONDARY);gap(8);
+        int boost=MicSource.boost(this);
+        Button boostButton=action("Mic boost: "+MicSource.boostLabel(boost),()->{MicSource.setBoost(this,MicSource.nextBoost(boost));render();});boostButton.setContentDescription("Mic boost, "+MicSource.boostLabel(boost)+". Double-tap to change");
+        label(boost==MicGain.OFF?"Your voice is sent as the mic records it.":boost==MicGain.HIGH?"Strong boost for a very quiet mic; may pick up more background noise.":"Raises a quiet mic so your Bot hears each turn. Not used with the Call mic.",12,SECONDARY);gap(8);
         action("Report a problem",()->openReport("","settings"));gap(8);
         label("Unofficial Grok client",12,SECONDARY);label("Not affiliated with or endorsed by xAI or Cursor.",12,SECONDARY);gap(4);label("5-minute calls · tasks go to your Bot",12,SECONDARY);label("Calls share this Bot’s main chat.",12,SECONDARY);
         action("Back",()->leaveSettings());gap(24);
